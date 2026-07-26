@@ -2,6 +2,10 @@
 
 [English](README.md) | 简体中文
 
+![CI](https://github.com/vangee0528/frontier/actions/workflows/ci.yml/badge.svg)
+![Wheels](https://github.com/vangee0528/frontier/actions/workflows/wheels.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
 **符号数学的编译执行层**：用贴近 SymPy 的语法书写公式，编译为
 机器码级的批量数值函数。在"推导一次、求值百万次"的场景下
 （拟合、优化、仿真、ODE），作为 `sympy.lambdify` 的直接替代。

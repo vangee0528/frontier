@@ -2,6 +2,10 @@
 
 English | [简体中文](README.zh-CN.md)
 
+![CI](https://github.com/vangee0528/frontier/actions/workflows/ci.yml/badge.svg)
+![Wheels](https://github.com/vangee0528/frontier/actions/workflows/wheels.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+
 **A compiled execution layer for symbolic math**: write formulas in
 SymPy-like syntax, compile them into machine-code batch kernels.
 A drop-in replacement for `sympy.lambdify` wherever you *derive once,
