@@ -32,6 +32,36 @@ jobs:
         env:
           PYTHONPATH: python
 
+  fuzz:
+    # 差分模糊：固定种子批 + 结果 artifact。fuzzer 发现 BUG 类记录
+    # 时退出码非零（类别定义唯一来源：tests/fuzz/fuzz_differential.py）
+    name: differential-fuzz / py3.12
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install "pybind11<3" llvmlite numpy sympy pytest ninja
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Run fuzz batch (seed 1101, n 300)
+        run: |
+          PYTHONPATH=python python tests/fuzz/fuzz_differential.py \
+            --seed 1101 --n 300 \
+            --json-out fuzz-records.jsonl --json-summary fuzz-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-results-seed1101
+          path: |
+            fuzz-summary.json
+            fuzz-records.jsonl
+          if-no-files-found: ignore
+
   test-windows-mingw:
     # Windows 走 MinGW-w64（主开发平台，全量验证）。
     # 核心代码已无 __int128 依赖（checked_int.hpp 抽象），MSVC 可编译

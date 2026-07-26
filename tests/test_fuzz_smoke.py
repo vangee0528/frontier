@@ -1,30 +1,47 @@
-"""差分模糊冒烟：每次测试运行固定跑一小批随机表达式 vs SymPy。
+"""差分模糊冒烟：CI 每次运行一小批固定种子的随机表达式对拍。
 
-完整批量用 `python tests/fuzz/fuzz_differential.py --seed S --n N`；
-这里只保证 CI 每次都过一遍生成-转换-编译-对拍全链路。
+与 fuzzer 共享同一套类别定义与退出判定（直接 import 其 run()），
+不在此处复制任何类别字符串。完整批量：
+    python tests/fuzz/fuzz_differential.py --seed S --n N
 """
-import subprocess
+import importlib.util
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("sympy")
 
-FUZZ = Path(__file__).parent / "fuzz" / "fuzz_differential.py"
+_FUZZ_PATH = Path(__file__).parent / "fuzz" / "fuzz_differential.py"
 
 
-def test_fuzz_smoke_batch():
-    r = subprocess.run(
-        [sys.executable, str(FUZZ), "--seed", "12345", "--n", "40",
-         "--no-skip-known"],
-        capture_output=True, text=True, timeout=300,
-        cwd=str(FUZZ.parent.parent.parent))
-    assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
-    # 允许预期类别（复数中间值 / sympy 自身精度差 / 明确不支持的转换），
-    # 但真 bug 类别必须为零
-    forbidden = ("CONVERT_BUG", "VALUE_BUG", "DERIV_BUG", "CRASH",
-                 "HARNESS_ERROR")
-    for line in r.stdout.splitlines():
-        for tag in forbidden:
-            assert f'"{tag}"' not in line, line
+def _load_fuzzer():
+    spec = importlib.util.spec_from_file_location("fuzz_differential", _FUZZ_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_fuzz_smoke_batch(tmp_path):
+    fz = _load_fuzzer()
+
+    # 类别三分法必须互斥且非空（结构自检，防止将来定义漂移）
+    assert fz.BUG_CATEGORIES and fz.EXPECTED_CATEGORIES
+    assert not (fz.BUG_CATEGORIES & fz.REVIEW_CATEGORIES)
+    assert not (fz.BUG_CATEGORIES & fz.EXPECTED_CATEGORIES)
+    assert not (fz.REVIEW_CATEGORIES & fz.EXPECTED_CATEGORIES)
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        summary = fz.run(seed=12345, n=40,
+                         json_out=str(tmp_path / "records.jsonl"))
+
+    # 退出判定与 fuzzer 完全一致：BUG 类记录即失败
+    assert summary["exit_code"] == 0, (summary, out.getvalue()[-2000:])
+    assert summary["bug_records"] == 0, summary
+    assert not summary["unknown_categories"], summary
+    # 该固定种子批当前也不应有待裁定记录；若将来出现，先人工裁定
+    # 归类（EXPECTED 或修复），不要直接放宽这个断言
+    assert summary["review_records"] == 0, summary

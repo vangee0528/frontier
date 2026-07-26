@@ -22,8 +22,14 @@ jobs:
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           # win32 跳过：llvmlite 无 32 位 wheel，该构型装不了运行时依赖
           CIBW_SKIP: "*-musllinux* *-win32"
+          CIBW_ARCHS_WINDOWS: "AMD64"
           CIBW_ARCHS_MACOS: "arm64 x86_64"
-          CIBW_TEST_REQUIRES: pytest numpy sympy scipy llvmlite
+          # 部署目标 11.0：llvmlite 的 macOS wheel 即 11.0+，更低目标会让
+          # 测试环境的 pip 拒收其 wheel 而转从源码构建（需要完整 LLVM）
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=11.0"
+          # 测试依赖保持最小集：scipy 适配器测试自动 importorskip，
+          # 其完整覆盖由主 CI 的原生环境负责；容器内源码编 scipy 不现实
+          CIBW_TEST_REQUIRES: pytest numpy sympy llvmlite
           CIBW_TEST_COMMAND: python -m pytest {project}/tests -q
       - uses: actions/upload-artifact@v4
         with:

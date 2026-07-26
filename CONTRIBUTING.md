@@ -19,7 +19,8 @@ PYTHONPATH=python python -m pytest tests -q
 - 新功能必须带测试；修 bug 必须带能复现该 bug 的回归测试；
 - C++ 改动同时跑 `ctest` 与 pytest（绑定层行为经 Python 测试覆盖）；
 - 涉及数值行为的改动，跑一轮差分模糊冒烟：
-  `PYTHONPATH=python python tests/fuzz/fuzz_differential.py --seed 1 --n 100 --no-skip-known`
+  `PYTHONPATH=python python tests/fuzz/fuzz_differential.py --seed 1 --n 100`
+  （发现 BUG 类记录时退出码非零；类别定义见该文件头部）
 - 涉及表示层（expr/builders/number）的改动，先读
   [docs/internals.md](docs/internals.md) 的不变量一节——
   它们是这个库正确性的地基。

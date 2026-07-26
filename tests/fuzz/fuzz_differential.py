@@ -47,6 +47,33 @@ MAX_MAG = 1e100    # reference values beyond this are treated as overflow-zone
 N_POINTS = 3       # valid sample points wanted per expression
 N_CANDIDATES = 40  # candidate points tried to find valid ones
 
+# --------------------------------------------------------------------------
+# 失败类别的唯一定义（CI 冒烟测试从这里 import，禁止在别处复制字符串）。
+#
+# BUG_CATEGORIES     —— Frontier 缺陷：出现任意一条，进程退出码非零。
+# REVIEW_CATEGORIES  —— 需要人工裁定（高条件数点等）：默认不置非零，
+#                       --strict 下同样视为失败。
+# EXPECTED_CATEGORIES—— 已裁定的预期行为（实数域语义 / sympy 侧更差 /
+#                       明确不支持的转换），永不置非零。
+# --------------------------------------------------------------------------
+BUG_CATEGORIES = frozenset({
+    "CONVERT_BUG",        # from_sympy 对受支持节点报错/错译
+    "DERIV_RAISE",        # fr.diff 意外抛异常
+    "VALUE_MISMATCH",     # 求值偏差且高精度仲裁站在 sympy 一侧
+    "DERIV_MISMATCH",     # 导数偏差且高精度仲裁站在 sympy 一侧
+    "HARD_CRASH",         # 崩溃（由 runner 检出）
+    "HARNESS_ERROR",      # 测试器自身异常（视为未证清白）
+})
+REVIEW_CATEGORIES = frozenset({
+    "VALUE_SUSPECT",      # 双方都偏离高精度值：病态/精度损失候审
+    "DERIV_SUSPECT",
+})
+EXPECTED_CATEGORIES = frozenset({
+    "EXPECTED_COMPLEX_INTERMEDIATE",
+    "SYMPY_SIDE_DIFF",
+    "CONVERT_UNSUPPORTED",
+})
+
 FUNCS1 = ["sin", "cos", "tan", "asin", "acos", "atan",
           "sinh", "cosh", "tanh", "exp", "log", "sqrt", "abs", "sign"]
 FUNCS2 = ["atan2", "max", "min"]
@@ -204,17 +231,7 @@ class Failure:
                 **self.detail}
 
 
-def has_pow_of_mul_or_pow(sexpr) -> bool:
-    """Known Frontier crash (assert cpp/src/expr.cpp:263): building a Mul
-    whose factor is a Pow with Mul/Pow base aborts the process.  Both
-    from_sympy and fr.diff can hit it.  Minimal repro:
-        fr: 2 * ((x*y)**z)   or   2 * ((x**fr.rational(3,2))**y)
-    Detect on the sympy side so the fuzzer can skip these expressions."""
-    return any(isinstance(p.base, (sp.Mul, sp.Pow))
-               for p in sexpr.atoms(sp.Pow))
-
-
-def check_one(idx, subseed, failures, verbose=False, skip_known_crash=True):
+def check_one(idx, subseed, failures, verbose=False):
     rng = random.Random(subseed)
     nvars = rng.randint(1, 4)
     svars = [sp.Symbol(f"x{i}", real=True) for i in range(nvars)]
@@ -230,10 +247,8 @@ def check_one(idx, subseed, failures, verbose=False, skip_known_crash=True):
 
     if sexpr.has(sp.zoo, sp.oo, -sp.oo, sp.nan, sp.I):
         return "gen_skip", None  # sympy folded to an unsupported special value
-
-    if skip_known_crash and has_pow_of_mul_or_pow(sexpr):
-        # KNOWN CRASH class (expr.cpp:263) — skip entirely, see docstring
-        return "skip_known_crash(pow_base)", None
+    # 历史注记：这里曾有 Pow(Mul/Pow 底) 崩溃类的跳过逻辑；该缺陷已修复
+    # 并由 tests/test_regressions.py 独立回归，跳过逻辑随之删除。
 
     # ---- (a) conversion --------------------------------------------------
     try:
@@ -416,33 +431,25 @@ def _rel(a, b):
 
 # --------------------------------------------------------------------------
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--n", type=int, default=200)
-    ap.add_argument("--only-idx", type=int, default=None)
-    ap.add_argument("--start", type=int, default=0,
-                    help="resume from this index (after a hard crash)")
-    ap.add_argument("--json-out", type=str, default=None)
-    ap.add_argument("--trace", action="store_true")
-    ap.add_argument("--no-skip-known", action="store_true",
-                    help="do not skip the known fr.diff pow-base crash")
-    args = ap.parse_args()
+def run(seed: int, n: int, *, start: int = 0, only_idx=None,
+        json_out=None, trace: bool = False, strict: bool = False) -> dict:
+    """跑一批随机表达式，返回结构化汇总（供 CLI 与 pytest 共用）。
 
-    jf = open(args.json_out, "a", encoding="utf-8") if args.json_out else None
+    返回 dict 含 exit_code：BUG_CATEGORIES 有记录即非零；
+    strict=True 时 REVIEW_CATEGORIES 同样非零。
+    """
+    jf = open(json_out, "a", encoding="utf-8") if json_out else None
     failures: list[Failure] = []
     counts: dict[str, int] = {}
     emitted = 0
-    indices = ([args.only_idx] if args.only_idx is not None
-               else range(args.start, args.n))
+    indices = [only_idx] if only_idx is not None else range(start, n)
     for i in indices:
-        subseed = args.seed * 1000003 + i
-        if args.trace:
+        subseed = seed * 1000003 + i
+        if trace:
             print(f"idx={i} subseed={subseed}", file=sys.stderr, flush=True)
         try:
             status, _ = check_one(i, subseed, failures,
-                                  verbose=args.only_idx is not None,
-                                  skip_known_crash=not args.no_skip_known)
+                                  verbose=only_idx is not None)
         except Exception:
             failures.append(Failure("HARNESS_ERROR", i, subseed, "?",
                                     {"error": traceback.format_exc(limit=3)}))
@@ -456,24 +463,73 @@ def main():
                 jf.write(json.dumps(rec, default=str) + "\n")
                 jf.flush()
             emitted += 1
-        if args.only_idx is None and (i + 1) % 100 == 0:
-            print(f"... {i + 1}/{args.n} done, {len(failures)} failure "
+        if only_idx is None and (i + 1) % 100 == 0:
+            print(f"... {i + 1}/{n} done, {len(failures)} failure "
                   f"records", flush=True)
-
-    print("\n=== summary (seed={}, n={}) ===".format(args.seed, args.n))
-    for k in sorted(counts):
-        print(f"  {k:24s} {counts[k]}")
-    by_cat: dict[str, list[Failure]] = {}
-    for f in failures:
-        by_cat.setdefault(f.category, []).append(f)
-    print("=== failure records by category ===")
-    for cat in sorted(by_cat):
-        print(f"  {cat:24s} {len(by_cat[cat])}")
     if jf:
         jf.close()
-    n_run = 1 if args.only_idx is not None else args.n - args.start
-    print(f"TOTAL expressions={n_run} failure_records={len(failures)}")
+
+    by_cat: dict[str, int] = {}
+    for f in failures:
+        by_cat[f.category] = by_cat.get(f.category, 0) + 1
+
+    unknown = set(by_cat) - BUG_CATEGORIES - REVIEW_CATEGORIES - EXPECTED_CATEGORIES
+    bug_n = sum(v for k, v in by_cat.items() if k in BUG_CATEGORIES)
+    review_n = sum(v for k, v in by_cat.items() if k in REVIEW_CATEGORIES)
+    # 未登记的类别一律按 bug 处理（新类别必须先归档再上线）
+    bug_n += sum(v for k, v in by_cat.items() if k in unknown)
+
+    exit_code = 1 if bug_n or (strict and review_n) else 0
+    summary = {
+        "seed": seed,
+        "n": (1 if only_idx is not None else n - start),
+        "statuses": counts,
+        "failures_by_category": by_cat,
+        "bug_records": bug_n,
+        "review_records": review_n,
+        "expected_records": sum(v for k, v in by_cat.items()
+                                if k in EXPECTED_CATEGORIES),
+        "unknown_categories": sorted(unknown),
+        "strict": strict,
+        "exit_code": exit_code,
+    }
+    return summary
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n", type=int, default=200)
+    ap.add_argument("--only-idx", type=int, default=None)
+    ap.add_argument("--start", type=int, default=0,
+                    help="resume from this index (after a hard crash)")
+    ap.add_argument("--json-out", type=str, default=None,
+                    help="append failure records as JSON lines to this file")
+    ap.add_argument("--json-summary", type=str, default=None,
+                    help="write the run summary as JSON to this file")
+    ap.add_argument("--trace", action="store_true")
+    ap.add_argument("--strict", action="store_true",
+                    help="REVIEW categories (ill-conditioned suspects) also fail")
+    args = ap.parse_args()
+
+    summary = run(args.seed, args.n, start=args.start, only_idx=args.only_idx,
+                  json_out=args.json_out, trace=args.trace, strict=args.strict)
+
+    print(f"\n=== summary (seed={summary['seed']}, n={summary['n']}) ===")
+    for k in sorted(summary["statuses"]):
+        print(f"  {k:24s} {summary['statuses'][k]}")
+    print("=== failure records by category ===")
+    for cat in sorted(summary["failures_by_category"]):
+        print(f"  {cat:24s} {summary['failures_by_category'][cat]}")
+    print(f"TOTAL expressions={summary['n']} "
+          f"bug={summary['bug_records']} review={summary['review_records']} "
+          f"expected={summary['expected_records']}")
+    print("SUMMARY " + json.dumps(summary, default=str))
+    if args.json_summary:
+        with open(args.json_summary, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, default=str)
+    return summary["exit_code"]
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
