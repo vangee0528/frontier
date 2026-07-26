@@ -21,9 +21,16 @@ endif()
 if(SKBUILD)
     install(TARGETS _core DESTINATION frontier)
 else()
-    # 开发构建：直接落到源码树的 python/frontier/，便于就地 import
+    # 开发构建：直接落到源码树的 python/frontier/，便于就地 import。
+    # 多配置生成器（MSVC/Xcode）需按配置覆盖，否则落进 Release/ 子目录
     set_target_properties(_core PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/python/frontier"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/python/frontier"
     )
+    foreach(cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+        set_target_properties(_core PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY_${cfg} "${CMAKE_SOURCE_DIR}/python/frontier"
+            RUNTIME_OUTPUT_DIRECTORY_${cfg} "${CMAKE_SOURCE_DIR}/python/frontier"
+        )
+    endforeach()
 endif()

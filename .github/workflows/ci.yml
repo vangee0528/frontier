@@ -32,6 +32,51 @@ jobs:
         env:
           PYTHONPATH: python
 
+  sanitizers:
+    # ASan+UBSan 常驻：C++ 核心全部断言在消毒器下运行。
+    # 刻意泄漏的单例（intern 表/常量）始终可达，LeakSanitizer 不计。
+    name: asan+ubsan / gcc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Debug + sanitizers)
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          -DFRONTIER_BUILD_PYTHON=OFF
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+      - name: Build
+        run: cmake --build build -j
+      - name: Run C++ tests under sanitizers
+        run: ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1
+          ./build/cpp/tests/frontier_tests
+
+  test-windows-msvc:
+    # MSVC 常驻验证（构建 + C++ 断言 + Python 全套）
+    name: windows-msvc / py${{ matrix.python }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        run: pip install "pybind11<3" llvmlite numpy sympy scipy pytest
+      - name: Configure (MSVC)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: C++ tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Python tests
+        run: python -m pytest tests -q
+        env:
+          PYTHONPATH: python
+
   fuzz:
     # 差分模糊：固定种子批 + 结果 artifact。fuzzer 发现 BUG 类记录
     # 时退出码非零（类别定义唯一来源：tests/fuzz/fuzz_differential.py）
