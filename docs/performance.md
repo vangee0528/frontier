@@ -22,6 +22,27 @@ llvmlite 0.44。不同机器绝对值会变，相对关系稳定。
 生态改造行的数字为作者环境对各库公开工作流的实测，
 测量脚本未随库分发，表中注明了对照方的写法以便独立复现：
 
+全对照矩阵（`python benchmarks/bench_matrix.py`，100 万点 4 输出，
+单线程，全部实现含输出分配；amortize = 编译成本摊销所需调用次数）：
+
+| 方案 | cold | first | hot 中位 | hot p95 | amortize | max-rel |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| sympy-lambdify | 228 ms | 39 ms | 45.0 ms | 78.6 ms | — | 7e-12 |
+| sympy-lambdify (cse) | 7 ms | 27 ms | 23.6 ms | 43.3 ms | 2 次 | 1e-11 |
+| numpy 手写 | ~0 | 21 ms | 25.2 ms | 28.2 ms | 1 次 | 参照 |
+| numexpr (1 线程) | 15 ms | 41 ms | 20.0 ms | 25.5 ms | 2 次 | 0 |
+| numba 手写融合循环 | 488 ms | 1245 ms | 6.1 ms | 8.7 ms | 44 次 | 4e-16 |
+| **frontier** | 68 ms | 3 ms | **3.2 ms** | 4.1 ms | **2 次** | 1e-11 |
+| frontier (fastmath) | 59 ms | 3 ms | 4.0 ms | 5.3 ms | 2 次 | 7e-12 |
+| frontier (vecmath off) | 29 ms | 5 ms | 5.9 ms | 10.3 ms | 1 次 | 1e-11 |
+
+（jax-cpu 在测量机 Windows 环境 DLL 加载失败，矩阵脚本会在可用
+环境自动纳入该列。）值得注意：frontier 的热执行比 numba 手写融合
+循环快近一倍——自动求导的表达式经 CSE 后共享子表达式只算一次，
+手写循环做不到这一点；且编译摊销 2 次调用即回本（numba 44 次）。
+
+分场景摘要：
+
 | 场景 | 对比对象 | 结果 |
 | --- | --- | ---: |
 | 3 变量梯度 @ 100 万点 | sympy lambdify | **~13×** |
@@ -45,6 +66,10 @@ llvmlite 0.44。不同机器绝对值会变，相对关系稳定。
 | `f(*arrays)` | 通用批量 |
 | `f.eval_stacked(*arrays)` | 多输出大批量（Jacobian、质量矩阵）——省一次 stack 拷贝 |
 | `f.eval_scalars(*vals)` | 每次一个点（ODE 右端、优化器回调） |
+
+三条路径均支持 ``out=`` 预分配输出（`eval_stacked(x, out=buf2d)`、
+`eval_scalars(v, out=buf1d)`）：高频回调与实时环中可完全消除
+输出分配与内存抖动。
 
 ## 编译开关怎么选
 

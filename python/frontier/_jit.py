@@ -99,9 +99,25 @@ def _cache_dir() -> Path:
 
 
 def _cache_key(ir_text: str) -> str:
-    """磁盘缓存键：IR 文本 + llvmlite 版本 + 宿主 CPU（对象码不可跨机复用）。"""
-    salt = f"{llvmlite.__version__}|{llvm.get_host_cpu_name()}|"
+    """磁盘缓存键。对象码严格绑定生成环境——键包含：
+
+    IR 文本、llvmlite 版本、target triple、操作系统、宿主 CPU 名与
+    完整特性串。缓存目录被跨机器/容器复制时自动失效而非误用。
+    """
+    _ensure_initialized()
+    salt = "|".join([
+        llvmlite.__version__,
+        llvm.get_process_triple(),
+        os.name,
+        llvm.get_host_cpu_name(),
+        llvm.get_host_cpu_features().flatten(),
+        "",
+    ])
     return hashlib.sha256((salt + ir_text).encode()).hexdigest()[:32]
+
+
+def _obj_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 class JitKernel:
@@ -116,10 +132,11 @@ class JitKernel:
         tm = _new_target_machine()
 
         obj_path: Path | None = None
-        hit = False
+        cached_obj: bytes | None = None
         if cache:
             obj_path = _cache_dir() / f"{_cache_key(ir_text)}.o"
-            hit = obj_path.is_file()
+            cached_obj = self._load_cached(obj_path)
+        hit = cached_obj is not None
 
         try:
             mod = llvm.parse_assembly(ir_text)
@@ -135,16 +152,23 @@ class JitKernel:
         self._engine = llvm.create_mcjit_compiler(mod, tm)
         if cache and obj_path is not None:
             path = obj_path
+            obj = cached_obj
 
             def _notify(_mod, buf) -> None:
-                if not path.is_file():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = path.with_suffix(f".tmp{os.getpid()}")
-                    tmp.write_bytes(buf)
-                    tmp.replace(path)  # 原子替换，进程间安全
+                sha_path = path.with_suffix(".sha")
+                if path.is_file() and sha_path.is_file():
+                    return  # 完整缓存已存在（并发写者先到）
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(f".tmp{os.getpid()}")
+                tmp_sha = path.with_suffix(f".sha_tmp{os.getpid()}")
+                tmp.write_bytes(buf)
+                tmp_sha.write_text(_obj_digest(bytes(buf)))
+                # 原子替换，进程间安全；先 .o 后 .sha（读取端以 .sha 为准）
+                tmp.replace(path)
+                tmp_sha.replace(sha_path)
 
             def _getbuffer(_mod):
-                return path.read_bytes() if hit else None
+                return obj  # 已校验的缓存字节；None 则触发正常编译
 
             self._engine.set_object_cache(notify_func=_notify,
                                           getbuffer_func=_getbuffer)
@@ -153,6 +177,25 @@ class JitKernel:
         if not addr:
             raise RuntimeError(f"kernel '{kernel_name}' not found after JIT")
         self.cfunc = KERNEL_CFUNC(addr)
+
+    @staticmethod
+    def _load_cached(path: Path) -> bytes | None:
+        """读缓存对象码；校验和缺失/不符（截断、损坏、部分写入）时
+        忽略缓存并删除坏文件，回到正常编译路径。"""
+        sha_path = path.with_suffix(".sha")
+        try:
+            data = path.read_bytes()
+            expect = sha_path.read_text().strip()
+        except OSError:
+            return None
+        if _obj_digest(data) != expect:
+            for p in (path, sha_path):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            return None
+        return data
 
 
 @lru_cache(maxsize=256)

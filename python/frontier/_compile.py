@@ -129,9 +129,19 @@ class CompiledFunction:
                 prepared.append(a)
         return prepared, n
 
-    def _run(self, ins, n: int) -> np.ndarray:
+    def _run(self, ins, n: int, out=None) -> np.ndarray:
         """执行内核，输出写入单块连续 (n_outputs, n) 缓冲。"""
-        buf = np.empty((self.n_outputs, n), dtype=np.float64)
+        if out is None:
+            buf = np.empty((self.n_outputs, n), dtype=np.float64)
+        else:
+            buf = out
+            if (not isinstance(buf, np.ndarray) or buf.dtype != np.float64
+                    or buf.shape != (self.n_outputs, n)
+                    or not buf.flags.c_contiguous):
+                raise ValueError(
+                    f"out= must be a C-contiguous float64 array of shape "
+                    f"({self.n_outputs}, {n}), got "
+                    f"{getattr(buf, 'shape', type(buf))}")
         if self.workers > 1 and n >= _PARALLEL_THRESHOLD:
             self._call_parallel(ins, buf, n)
         else:
@@ -144,14 +154,19 @@ class CompiledFunction:
             self._kernel.cfunc(in_ptrs, out_ptrs, n)
         return buf
 
-    def eval_stacked(self, *arrays) -> np.ndarray:
+    def eval_stacked(self, *arrays, out=None) -> np.ndarray:
         """批量求值，直接返回 (n_outputs, n) 二维数组（无 stack 拷贝）。
 
         等价于 np.stack(self(*arrays))，但输出本就写在同一块连续内存里。
         大批量多输出场景（Jacobian、质量矩阵）建议使用。
+
+        out : ndarray, optional
+            预分配的 C 连续 float64 数组，shape (n_outputs, n)。
+            提供时结果原地写入并返回它——高频调用（ODE 回调、实时环）
+            可完全消除输出分配。
         """
         ins, n = self._prepare_inputs(arrays)
-        return self._run(ins, n)
+        return self._run(ins, n, out=out)
 
     def _call_parallel(self, ins, buf: np.ndarray, n: int) -> None:
         """分块多线程求值：ctypes 调用释放 GIL，内核跨块无共享状态。"""
@@ -174,11 +189,13 @@ class CompiledFunction:
         for f in futures:
             f.result()
 
-    def eval_scalars(self, *vals) -> np.ndarray:
+    def eval_scalars(self, *vals, out=None) -> np.ndarray:
         """单点快路径：标量输入 → shape (n_outputs,) 数组。
 
         复用线程局部的预分配缓冲，绕过 __call__ 的广播/物化机制；
         ODE 右端函数这类「每步只算一个点」的场景专用。线程安全。
+        传入 ``out=``（float64、shape (n_outputs,)）时结果写入其中，
+        每步零分配。
         """
         if len(vals) != self.n_inputs:
             raise TypeError(
@@ -188,16 +205,19 @@ class CompiledFunction:
         bufs = getattr(self._tls, "scalar_buffers", None)
         if bufs is None:
             ins = np.empty(self.n_inputs)
-            out = np.empty(self.n_outputs)
+            ob = np.empty(self.n_outputs)
             in_ptrs = (ctypes.c_void_p * self.n_inputs)(
                 *(ins.ctypes.data + 8 * i for i in range(self.n_inputs)))
             out_ptrs = (ctypes.c_void_p * self.n_outputs)(
-                *(out.ctypes.data + 8 * i for i in range(self.n_outputs)))
-            bufs = self._tls.scalar_buffers = (ins, out, in_ptrs, out_ptrs)
-        ins, out, in_ptrs, out_ptrs = bufs
+                *(ob.ctypes.data + 8 * i for i in range(self.n_outputs)))
+            bufs = self._tls.scalar_buffers = (ins, ob, in_ptrs, out_ptrs)
+        ins, obuf, in_ptrs, out_ptrs = bufs
         ins[:] = vals
         self._kernel.cfunc(in_ptrs, out_ptrs, 1)
-        return out.copy()
+        if out is not None:
+            np.copyto(out, obuf)
+            return out
+        return obuf.copy()
 
     @property
     def optimized_ir(self) -> str:

@@ -30,6 +30,8 @@ SUITE = [
      {"quick": ["--quick"], "full": []}),
     ("scaling   加速比随规模的变化",              "bench_scaling.py",
      {"quick": ["--quick"], "full": []}),
+    ("matrix    执行方案全对照（lambdify/numexpr/numba/jax/frontier）",
+     "bench_matrix.py", {"quick": ["--quick"], "full": []}),
 ]
 
 
