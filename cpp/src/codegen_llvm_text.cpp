@@ -1,6 +1,5 @@
 #include "frontier/codegen/llvm_text.hpp"
 
-#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <set>
@@ -8,6 +7,7 @@
 
 #include "frontier/codegen/vecmath.hpp"
 #include "frontier/error.hpp"
+#include "frontier/portable.hpp"
 #include "frontier/func_registry.hpp"
 
 namespace frontier {
@@ -18,7 +18,7 @@ namespace {
 std::string f64_lit(double v) {
     char buf[24];
     std::snprintf(buf, sizeof(buf), "0x%016llX",
-                  static_cast<unsigned long long>(std::bit_cast<uint64_t>(v)));
+                  static_cast<unsigned long long>(portable::f64_bits(v)));
     return buf;
 }
 

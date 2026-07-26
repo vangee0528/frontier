@@ -134,7 +134,8 @@ def test_dangling_expression_no_crash_at_exit():
             "x, a, b = fr.symbols('x a b')\n"
             "e = x*a + b\n"
             "print('ok')\n")
-    env_path = str(Path(__file__).resolve().parent.parent / "python")
+    import frontier as _fr
+    env_path = str(Path(_fr.__file__).resolve().parent.parent)
     r = subprocess.run([sys.executable, "-c", code], capture_output=True,
                        text=True, timeout=60,
                        env={**__import__('os').environ, "PYTHONPATH": env_path})

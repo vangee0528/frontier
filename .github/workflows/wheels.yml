@@ -20,7 +20,8 @@ jobs:
       - uses: pypa/cibuildwheel@v2.21
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
-          CIBW_SKIP: "*-musllinux*"
+          # win32 跳过：llvmlite 无 32 位 wheel，该构型装不了运行时依赖
+          CIBW_SKIP: "*-musllinux* *-win32"
           CIBW_ARCHS_MACOS: "arm64 x86_64"
           CIBW_TEST_REQUIRES: pytest numpy sympy scipy llvmlite
           CIBW_TEST_COMMAND: python -m pytest {project}/tests -q

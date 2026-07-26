@@ -82,7 +82,8 @@ def test_compiled_function_pickle_subprocess():
     x = fr.symbols("x")
     f = fr.compile(x**2 + fr.exp(x), args=(x,))
     blob = pickle.dumps(f)
-    py_dir = Path(__file__).resolve().parent.parent / "python"
+    # 让子进程从与当前进程相同的位置导入 frontier（源码树或 site-packages）
+    py_dir = Path(fr.__file__).resolve().parent.parent
     code = (
         "import pickle, sys, numpy as np\n"
         "f = pickle.loads(sys.stdin.buffer.read())\n"

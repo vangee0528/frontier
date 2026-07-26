@@ -1,10 +1,10 @@
 #include "frontier/tape.hpp"
 
-#include <bit>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "frontier/error.hpp"
+#include "frontier/portable.hpp"
 #include "frontier/printer.hpp"
 #include "frontier/visitor.hpp"
 
@@ -44,7 +44,7 @@ private:
     }
 
     int32_t emit_const(double v) {
-        const uint64_t bits = std::bit_cast<uint64_t>(v);
+        const uint64_t bits = portable::f64_bits(v);
         if (auto it = const_memo_.find(bits); it != const_memo_.end()) return it->second;
         TapeOp op;
         op.kind = TapeOp::Kind::Const;

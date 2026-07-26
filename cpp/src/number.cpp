@@ -1,13 +1,12 @@
 #include "frontier/number.hpp"
 
-#include <bit>
 #include <cassert>
-#include <charconv>
 #include <cmath>
 #include <functional>
 #include <numeric>
 
 #include "frontier/checked_int.hpp"
+#include "frontier/portable.hpp"
 #include "frontier/error.hpp"
 
 namespace frontier {
@@ -237,7 +236,7 @@ bool Number::operator==(const Number& o) const {
         case Kind::Rational: return num_ == o.num_ && den_ == o.den_;
         case Kind::Real:
             // 位级比较：NaN == NaN 为真，保证 hash-consing 一致性
-            return std::bit_cast<uint64_t>(real_) == std::bit_cast<uint64_t>(o.real_);
+            return portable::f64_bits(real_) == portable::f64_bits(o.real_);
     }
     return false;
 }
@@ -278,7 +277,7 @@ size_t Number::hash() const {
             seed = hash_combine(seed, std::hash<int64_t>{}(den_));
             break;
         case Kind::Real:
-            seed = hash_combine(seed, std::hash<uint64_t>{}(std::bit_cast<uint64_t>(real_)));
+            seed = hash_combine(seed, std::hash<uint64_t>{}(portable::f64_bits(real_)));
             break;
     }
     return seed;
@@ -290,10 +289,8 @@ std::string Number::to_string() const {
         case Kind::Rational:
             return std::to_string(num_) + "/" + std::to_string(den_);
         case Kind::Real: {
-            // 最短往返表示（如 0.5 而非 0.500000）
-            char buf[32];
-            const auto res = std::to_chars(buf, buf + sizeof(buf), real_);
-            return std::string(buf, res.ptr);
+            // 往返安全表示（如 0.5 而非 0.500000）
+            return portable::format_double(real_);
         }
     }
     return {};
