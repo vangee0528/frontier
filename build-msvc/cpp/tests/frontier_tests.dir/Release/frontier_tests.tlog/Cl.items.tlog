@@ -1,0 +1,5 @@
+H:\WorkSpace\language-Frontier\cpp\tests\main.cpp;H:\WorkSpace\language-Frontier\build-msvc\cpp\tests\frontier_tests.dir\Release\main.obj
+H:\WorkSpace\language-Frontier\cpp\tests\test_number.cpp;H:\WorkSpace\language-Frontier\build-msvc\cpp\tests\frontier_tests.dir\Release\test_number.obj
+H:\WorkSpace\language-Frontier\cpp\tests\test_expr.cpp;H:\WorkSpace\language-Frontier\build-msvc\cpp\tests\frontier_tests.dir\Release\test_expr.obj
+H:\WorkSpace\language-Frontier\cpp\tests\test_diff.cpp;H:\WorkSpace\language-Frontier\build-msvc\cpp\tests\frontier_tests.dir\Release\test_diff.obj
+H:\WorkSpace\language-Frontier\cpp\tests\test_tape.cpp;H:\WorkSpace\language-Frontier\build-msvc\cpp\tests\frontier_tests.dir\Release\test_tape.obj

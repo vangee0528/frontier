@@ -1,0 +1,36 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.pyd
+*.dll
+*.so
+*.o
+*.obj
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Benchmark outputs
+benchmarks/results/
+
+# 开发过程产物（案例研究/基准脚本/交接笔记），不随仓库发布
+dev/
+

@@ -1,0 +1,53 @@
+[build-system]
+# pybind11 pin：3.0.x 在 MSVC Release 下模块初始化即 access violation
+#（最小模块可复现，MSVC 14.44 + CPython 3.10 实测），2.13 正常
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12,<3"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "frontier-symbolic"
+version = "1.0.0"
+description = "Symbolic-numeric pipeline: SymPy-like symbolic math compiled to machine-code kernels (drop-in lambdify replacement)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "vangee" }]
+keywords = ["symbolic", "sympy", "lambdify", "jit", "llvm", "autodiff",
+            "scientific-computing", "code-generation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = ["numpy>=1.24", "llvmlite>=0.44"]
+
+[project.urls]
+Homepage = "https://github.com/vangee0528/frontier"
+Repository = "https://github.com/vangee0528/frontier"
+Issues = "https://github.com/vangee0528/frontier/issues"
+Changelog = "https://github.com/vangee0528/frontier/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["pytest", "sympy", "scipy"]
+
+[tool.scikit-build]
+wheel.packages = ["python/frontier"]
+# 排除开发树垃圾（MSVC 直构目录、调试符号、字节码缓存）。
+# 注意不能排除 *.pyd/*.so —— wheel 的扩展模块正是 CMake install 写入的。
+# 本地开发树打 wheel 前请先移除 python/frontier/ 下的旧构建产物
+#（CI 从干净 checkout 构建，.gitignore 已排除二进制，无此问题）。
+wheel.exclude = ["frontier/*.pdb", "frontier/Debug/**",
+                 "frontier/Release/**", "frontier/__pycache__/**"]
+cmake.version = ">=3.22"
+build.verbose = true
+
+[tool.scikit-build.cmake.define]
+FRONTIER_BUILD_TESTS = "OFF"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
