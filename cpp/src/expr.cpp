@@ -267,12 +267,14 @@ ExprPtr make_mul(Number coeff, std::vector<MulFactor> factors) {
     for (size_t i = 0; i + 1 < factors.size(); ++i)
         assert(Expr::compare(factors[i].base, factors[i + 1].base) < 0);
     for (const auto& f : factors) {
-        // base 为 Mul/Pow 仅在「符号指数、不可安全分配」时合法：
-        // (x·y)^z 或 (x^y)^z 作为因子保持嵌套（整数指数已在 pow() 分配）。
-        // 同底合并经指针相等仍然有效，规范序不受影响。
-        assert(!(f.base->kind() == ExprKind::Mul &&
-                 f.exp->kind() == ExprKind::Constant &&
-                 f.exp->number().is_int()));
+        // base 为 Mul/Pow 仅在「非整数指数、不可安全分配」时合法：
+        // (x·y)^z 或 (x^y)^z 作为因子保持嵌套。整数指数必须已经
+        // pow() 分配展开（mul() 的二次归一保证同底合并后的整数指数
+        // 也会回流 pow()），否则会丢失系数符号等信息。
+        const bool int_exp = f.exp->kind() == ExprKind::Constant &&
+                             f.exp->number().is_int();
+        assert(!(int_exp && (f.base->kind() == ExprKind::Mul ||
+                             f.base->kind() == ExprKind::Pow)));
         assert(!f.exp->is_zero());
     }
     assert(!(factors.size() == 1 && coeff.is_one()));

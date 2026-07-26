@@ -1,7 +1,12 @@
 name: Wheels
 
-# 触发：打 tag 或手动。产出 manylinux / macOS / Windows wheel 并上传。
-# 核心已无 __int128 依赖，MSVC 代码级可移植（Windows wheel 由 CI 首跑验证）。
+# 触发：打 tag 或手动。产出 manylinux_2_28 / macOS(双架构分 runner) /
+# Windows AMD64 wheel 并上传为 artifact。
+#
+# 镜像选 manylinux_2_28（而非 2014）：numpy≥2.1 只发 2_28 二进制，
+# 2014 容器（glibc 2.17）里测试依赖会退到源码编译（容器 GCC 过旧必败）。
+# macOS 按架构拆分 runner：交叉构建的 wheel 无法在宿主测试，
+# 标签解析也易错——macos-13 = x86_64，macos-latest = arm64。
 on:
   workflow_dispatch:
   push:
@@ -9,29 +14,37 @@ on:
 
 jobs:
   build-wheels:
-    name: wheels on ${{ matrix.os }}
+    name: wheels ${{ matrix.os }} (${{ matrix.archs }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            archs: x86_64
+          - os: macos-13
+            archs: x86_64
+          - os: macos-latest
+            archs: arm64
+          - os: windows-latest
+            archs: AMD64
     steps:
       - uses: actions/checkout@v4
       - uses: pypa/cibuildwheel@v2.21
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
-          # win32 跳过：llvmlite 无 32 位 wheel，该构型装不了运行时依赖
+          # win32 无 llvmlite；musllinux 生态同理
           CIBW_SKIP: "*-musllinux* *-win32"
-          CIBW_ARCHS_WINDOWS: "AMD64"
-          CIBW_ARCHS_MACOS: "arm64 x86_64"
-          # 部署目标 11.0：llvmlite 的 macOS wheel 即 11.0+，更低目标会让
-          # 测试环境的 pip 拒收其 wheel 而转从源码构建（需要完整 LLVM）
+          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          # llvmlite 的 macOS wheel 为 11.0+，更低部署目标会让测试环境
+          # 的 pip 拒收其二进制转而从源码构建（需要完整 LLVM）
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=11.0"
           # 测试依赖保持最小集：scipy 适配器测试自动 importorskip，
-          # 其完整覆盖由主 CI 的原生环境负责；容器内源码编 scipy 不现实
+          # 完整覆盖由主 CI 的原生环境负责
           CIBW_TEST_REQUIRES: pytest numpy sympy llvmlite
           CIBW_TEST_COMMAND: python -m pytest {project}/tests -q
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ matrix.archs }}
           path: wheelhouse/*.whl

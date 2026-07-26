@@ -108,3 +108,20 @@ def test_uniform_with_workers_no_oob():
     xs = np.linspace(0, 1, 200_000)
     g = fr.compile(a * x + b, args=(a, b, x), uniform=(a, b), workers=4)
     np.testing.assert_allclose(g(2.0, 3.0, xs), 2 * xs + 3)
+
+def test_merged_integer_exponent_renormalizes():
+    """CI fuzz（seed 1101 idx 175）发现：同底合并出整数指数后未回流
+    pow() 分配展开，(-x)^(-1) 丢符号 → 导数整体反号。"""
+    sp = pytest.importorskip("sympy")
+    x1 = sp.Symbol("x1", real=True)
+    e = sp.log((-x1) ** sp.Rational(3, 2))
+    fx = fr.symbol("x1")
+    d = fr.diff(fr.from_sympy(e), fx)
+    got = fr.compile(d, args=(fx,))(np.array([-1.3]))[0]
+    want = float(sp.diff(e, x1).subs(x1, -1.3))          # 3/(2x)
+    assert abs(got - want) < 1e-12
+
+    # 结构层面：合并出的整数指数因子必须已展开
+    x = fr.symbols("x")
+    nx = -x
+    assert nx ** fr.rational(1, 2) * nx ** fr.rational(-3, 2) == -(x ** -1)

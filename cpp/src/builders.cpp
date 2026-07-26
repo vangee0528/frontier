@@ -187,6 +187,24 @@ ExprPtr mul(std::span<const ExprPtr> ops) {
 
     if (coeff.is_zero()) return zero();
     if (kept.empty()) return constant(coeff);
+
+    // 二次归一：同底指数相加可能把「Mul/Pow 底 + 符号指数」的合法嵌套
+    // 变成「Mul/Pow 底 + 整数指数」——该形态必须经 pow() 分配展开
+    // （如 (-x)^(1/2)·(-x)^(-3/2) → (-x)^(-1) → -x^(-1)，否则丢符号）。
+    // pow() 对整数指数的 Mul/Pow 底恒展开，递归一层即收敛。
+    for (const auto& f : kept) {
+        const bool int_exp = f.exp->kind() == ExprKind::Constant &&
+                             f.exp->number().is_int();
+        if (int_exp && (f.base->kind() == ExprKind::Mul ||
+                        f.base->kind() == ExprKind::Pow)) {
+            std::vector<ExprPtr> parts;
+            parts.reserve(kept.size() + 1);
+            parts.push_back(constant(coeff));
+            for (const auto& g : kept) parts.push_back(pow(g.base, g.exp));
+            return mul(std::span<const ExprPtr>(parts));
+        }
+    }
+
     if (kept.size() == 1 && coeff.is_one()) return pow(kept[0].base, kept[0].exp);
 
     // 数值系数对单个 Add 因子分配律展开：2*(x+y) → 2x+2y，利于同类项合并

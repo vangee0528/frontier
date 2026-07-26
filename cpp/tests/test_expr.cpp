@@ -133,3 +133,17 @@ TEST_CASE("除法即负幂") {
     CHECK(e->kind() == ExprKind::Mul);
     CHECK(to_string(e) == "x*y^(-1)");
 }
+
+TEST_CASE("同底合并出整数指数时回流 pow 展开（fuzz 回归）") {
+    auto x = symbol("x");
+    auto nx = neg(x);  // Mul(-1, x)
+
+    // (-x)^(1/2) · (-x)^(-3/2) = (-x)^(-1) = -x^(-1)（符号必须保留）
+    auto e = mul(pow(nx, rational(1, 2)), pow(nx, rational(-3, 2)));
+    CHECK(e.get() == neg(pow(x, integer(-1))).get());
+
+    // (x^y)^(1/3) · (x^y)^(2/3) = x^y（Pow 底整数指数同样回流）
+    auto y = symbol("y");
+    auto p = pow(x, y);
+    CHECK(mul(pow(p, rational(1, 3)), pow(p, rational(2, 3))).get() == p.get());
+}
